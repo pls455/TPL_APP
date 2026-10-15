@@ -177,6 +177,7 @@ private fun TplApp() {
                         onBranchSelected = { branch ->
                             selectedBranchId = branch.id
                             selectedSubject = null
+                            selectedTest = null
                             preferences.edit().putString("student_branch_id", branch.id).apply()
                         },
                         onSubjectSelected = { selectedSubject = it }
@@ -523,7 +524,7 @@ private fun SubjectResourcesScreen(
             item {
                 InfoCard(
                     "لا توجد موارد منشورة بعد",
-                    "يمكن للإدارة إضافة رابط للمادة من لوحة TPL. لن يظهر المورد هنا حتى يتم اعتماده ونشره.",
+                    "يمكن للإدارة رفع ملف أو إضافة رابط للمادة من لوحة TPL. لن يظهر المورد هنا حتى يتم اعتماده ونشره.",
                     Icons.Default.FolderOpen
                 )
             }
@@ -542,6 +543,12 @@ private fun SubjectResourcesScreen(
                         "video" -> "فيديو"
                         "exam" -> "امتحان سابق"
                         "summary" -> "ملخص"
+                        "image" -> "صورة"
+                        "document" -> "مستند Word"
+                        "presentation" -> "عرض تقديمي"
+                        "spreadsheet" -> "ملف Excel"
+                        "audio" -> "ملف صوتي"
+                        "archive" -> "ملف مضغوط"
                         else -> "رابط خارجي"
                     },
                     color = Color(0xFF8D713B), fontSize = 11.sp, fontWeight = FontWeight.SemiBold
