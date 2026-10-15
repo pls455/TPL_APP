@@ -3,9 +3,14 @@ package com.karamdev.tpl
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -89,31 +94,21 @@ private fun TplApp() {
             containerColor = Ivory,
             topBar = {
                 Row(
-                    Modifier.fillMaxWidth().background(Forest).padding(horizontal = 20.dp, vertical = 18.dp),
+                    Modifier.fillMaxWidth().background(Forest).padding(horizontal = 20.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text("TPL", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
-                        Text("Tawjihi Palestine Library", color = Color.White.copy(alpha = .8f), fontSize = 11.sp)
+                        Text("مكتبة التوجيهي الفلسطيني", color = Color.White.copy(alpha = .82f), fontSize = 12.sp)
                     }
-                    var expanded by remember { mutableStateOf(false) }
-                    Box {
-                        TextButton(enabled = branches.isNotEmpty(), onClick = { expanded = true }) {
-                            Text(
-                                selectedBranch?.name ?: if (branchesLoading) "تحميل الفروع..." else "لا توجد فروع",
-                                color = Color.White
-                            )
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color.White)
-                        }
-                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            branches.forEach { branch ->
-                                DropdownMenuItem(text = { Text(branch.name) }, onClick = {
-                                    selectedBranchId = branch.id
-                                    selectedSubject = null
-                                    preferences.edit().putString("student_branch_id", branch.id).apply()
-                                    expanded = false
-                                })
-                            }
+                    Surface(color = Color.White.copy(alpha = .12f), shape = RoundedCornerShape(14.dp)) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
+                            Icon(Icons.Default.MenuBook, contentDescription = null, tint = Gold, modifier = Modifier.size(18.dp))
+                            Text("تعلم بترتيب", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -134,14 +129,32 @@ private fun TplApp() {
         ) { padding ->
             when (selectedTab) {
                 0 -> HomeScreen(
-                    Modifier.padding(padding),
-                    selectedBranch?.name,
-                    branchesLoading,
-                    branchesError,
+                    modifier = Modifier.padding(padding),
+                    branches = branches,
+                    selectedBranchId = selectedBranchId,
+                    branchName = selectedBranch?.name,
+                    branchesLoading = branchesLoading,
+                    branchesError = branchesError,
+                    onBranchSelected = { branch ->
+                        selectedBranchId = branch.id
+                        selectedSubject = null
+                        preferences.edit().putString("student_branch_id", branch.id).apply()
+                    },
                     onBrowseSubjects = { selectedTab = 1 }
                 )
                 1 -> if (selectedSubject == null) {
-                    SubjectsScreen(Modifier.padding(padding), selectedBranch, onSubjectSelected = { selectedSubject = it })
+                    SubjectsScreen(
+                        modifier = Modifier.padding(padding),
+                        branch = selectedBranch,
+                        branches = branches,
+                        selectedBranchId = selectedBranchId,
+                        onBranchSelected = { branch ->
+                            selectedBranchId = branch.id
+                            selectedSubject = null
+                            preferences.edit().putString("student_branch_id", branch.id).apply()
+                        },
+                        onSubjectSelected = { selectedSubject = it }
+                    )
                 } else {
                     SubjectResourcesScreen(Modifier.padding(padding), selectedBranch, selectedSubject!!, onBack = { selectedSubject = null })
                 }
@@ -160,9 +173,12 @@ private fun TplApp() {
 @Composable
 private fun HomeScreen(
     modifier: Modifier = Modifier,
+    branches: List<Branch>,
+    selectedBranchId: String,
     branchName: String?,
     branchesLoading: Boolean,
     branchesError: String?,
+    onBranchSelected: (Branch) -> Unit,
     onBrowseSubjects: () -> Unit
 ) {
     LazyColumn(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -185,6 +201,14 @@ private fun HomeScreen(
                     }
                 }
             }
+        }
+        item {
+            BranchPickerCard(
+                branches = branches,
+                selectedBranchId = selectedBranchId,
+                loading = branchesLoading,
+                onBranchSelected = onBranchSelected
+            )
         }
         if (branchesError != null) {
             item { Text(branchesError, color = Color(0xFF9B3737), fontSize = 12.sp) }
@@ -221,7 +245,83 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun SubjectsScreen(modifier: Modifier = Modifier, branch: Branch?, onSubjectSelected: (Subject) -> Unit) {
+private fun BranchPickerCard(
+    branches: List<Branch>,
+    selectedBranchId: String,
+    loading: Boolean,
+    onBranchSelected: (Branch) -> Unit
+) {
+    Column(
+        Modifier.fillMaxWidth()
+            .background(Color.White, RoundedCornerShape(18.dp))
+            .padding(16.dp)
+            .animateContentSize(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                Modifier.size(42.dp).background(Ivory, RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.School, contentDescription = null, tint = Forest, modifier = Modifier.size(23.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text("فرعك الدراسي", color = Forest, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    when {
+                        loading -> "جارٍ تحميل الفروع من السحابة..."
+                        branches.isEmpty() -> "لا توجد فروع منشورة حاليًا"
+                        else -> "اختر الفرع لعرض مواده المناسبة"
+                    },
+                    color = Color.Gray, fontSize = 11.sp
+                )
+            }
+            Icon(Icons.Default.Tune, contentDescription = null, tint = Gold)
+        }
+        AnimatedVisibility(visible = branches.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                branches.forEach { branch ->
+                    val selected = branch.id == selectedBranchId
+                    val container by animateColorAsState(
+                        targetValue = if (selected) Forest else Ivory,
+                        label = "branch-chip-color"
+                    )
+                    val content by animateColorAsState(
+                        targetValue = if (selected) Color.White else Forest,
+                        label = "branch-chip-content"
+                    )
+                    Surface(
+                        color = container,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.animateContentSize().clickable { onBranchSelected(branch) }
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 15.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (selected) Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Gold, modifier = Modifier.size(16.dp))
+                            Text(branch.name, color = content, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubjectsScreen(
+    modifier: Modifier = Modifier,
+    branch: Branch?,
+    branches: List<Branch>,
+    selectedBranchId: String,
+    onBranchSelected: (Branch) -> Unit,
+    onSubjectSelected: (Subject) -> Unit
+) {
     val db = remember { FirebaseFirestore.getInstance() }
     val subjectItems = remember(branch?.id) { mutableStateListOf<Subject>() }
     var loading by remember(branch?.id) { mutableStateOf(branch != null) }
@@ -262,9 +362,17 @@ private fun SubjectsScreen(modifier: Modifier = Modifier, branch: Branch?, onSub
     val filtered = subjectItems.filter { it.name.contains(search.trim(), ignoreCase = true) }
     LazyColumn(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
+            BranchPickerCard(
+                branches = branches,
+                selectedBranchId = selectedBranchId,
+                loading = false,
+                onBranchSelected = onBranchSelected
+            )
+        }
+        item {
             SectionTitle(
-                if (branch != null) "مواد الفرع " + branch.name else "المواد",
-                "المواد المنشورة تُحمّل مباشرة من Firestore."
+                if (branch != null) "مواد " + branch.name else "المواد الدراسية",
+                "اختر المادة لعرض مواردها المنشورة."
             )
         }
         item {
