@@ -4,8 +4,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -127,7 +133,16 @@ private fun TplApp() {
                 }
             }
         ) { padding ->
-            when (selectedTab) {
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    (fadeIn(animationSpec = tween(180)) +
+                        slideInHorizontally(animationSpec = tween(180)) { it / 18 }) togetherWith
+                        fadeOut(animationSpec = tween(120))
+                },
+                label = "tpl-screen-transition"
+            ) { tab ->
+            when (tab) {
                 0 -> HomeScreen(
                     modifier = Modifier.padding(padding),
                     branches = branches,
@@ -165,6 +180,7 @@ private fun TplApp() {
                     Icons.Default.Quiz
                 )
                 else -> PomodoroScreen(Modifier.padding(padding))
+            }
             }
         }
     }
