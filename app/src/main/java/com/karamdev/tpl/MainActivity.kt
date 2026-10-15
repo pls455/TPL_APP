@@ -21,11 +21,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.delay
 
 private val Forest = Color(0xFF173F35)
 private val Ivory = Color(0xFFF5F0E6)
 private val Gold = Color(0xFFC5A15B)
+
+private data class Branch(val id: String, val name: String, val sortOrder: Int)
+private data class Subject(val id: String, val name: String, val branchIds: List<String>, val sortOrder: Int)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,28 +43,69 @@ class MainActivity : ComponentActivity() {
 private fun TplApp() {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("tpl_preferences", 0) }
+    val db = remember { FirebaseFirestore.getInstance() }
     var selectedTab by remember { mutableIntStateOf(0) }
-    var selectedBranch by remember {
-        mutableStateOf(preferences.getString("student_branch", "العلمي") ?: "العلمي")
+    val branches = remember { mutableStateListOf<Branch>() }
+    var branchesLoading by remember { mutableStateOf(true) }
+    var branchesError by remember { mutableStateOf<String?>(null) }
+    var selectedBranchId by remember {
+        mutableStateOf(preferences.getString("student_branch_id", "") ?: "")
     }
+
+    DisposableEffect(db) {
+        val registration: ListenerRegistration = db.collection("branches")
+            .whereEqualTo("active", true)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    branchesLoading = false
+                    branchesError = "تعذّر تحميل الفروع من السحابة. تحقق من الإنترنت وقواعد Firestore."
+                    return@addSnapshotListener
+                }
+                val updated = snapshot?.documents.orEmpty().mapNotNull { document ->
+                    val name = document.getString("name")?.trim().orEmpty()
+                    if (name.isBlank()) null
+                    else Branch(document.id, name, (document.get("order") as? Number)?.toInt() ?: 9999)
+                }.sortedWith(compareBy<Branch> { it.sortOrder }.thenBy { it.name })
+                branches.clear()
+                branches.addAll(updated)
+                branchesLoading = false
+                branchesError = null
+                if (branches.none { it.id == selectedBranchId }) {
+                    selectedBranchId = branches.firstOrNull()?.id.orEmpty()
+                    preferences.edit().putString("student_branch_id", selectedBranchId).apply()
+                }
+            }
+        onDispose { registration.remove() }
+    }
+
+    val selectedBranch = branches.firstOrNull { it.id == selectedBranchId }
     val tabs = listOf("الرئيسية", "المواد", "الاختبارات", "أدواتي")
     MaterialTheme(colorScheme = lightColorScheme(primary = Forest, secondary = Gold, background = Ivory, surface = Color.White)) {
         Scaffold(
             containerColor = Ivory,
             topBar = {
-                Row(Modifier.fillMaxWidth().background(Forest).padding(horizontal = 20.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.fillMaxWidth().background(Forest).padding(horizontal = 20.dp, vertical = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Column(Modifier.weight(1f)) {
                         Text("TPL", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
                         Text("Tawjihi Palestine Library", color = Color.White.copy(alpha = .8f), fontSize = 11.sp)
                     }
                     var expanded by remember { mutableStateOf(false) }
                     Box {
-                        TextButton(onClick = { expanded = true }) { Text("الفرع: $selectedBranch", color = Color.White) }
+                        TextButton(enabled = branches.isNotEmpty(), onClick = { expanded = true }) {
+                            Text(
+                                selectedBranch?.name ?: if (branchesLoading) "تحميل الفروع..." else "لا توجد فروع",
+                                color = Color.White
+                            )
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color.White)
+                        }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            listOf("العلمي", "الأدبي", "الصناعي").forEach { branch ->
-                                DropdownMenuItem(text = { Text(branch) }, onClick = {
-                                    selectedBranch = branch
-                                    preferences.edit().putString("student_branch", branch).apply()
+                            branches.forEach { branch ->
+                                DropdownMenuItem(text = { Text(branch.name) }, onClick = {
+                                    selectedBranchId = branch.id
+                                    preferences.edit().putString("student_branch_id", branch.id).apply()
                                     expanded = false
                                 })
                             }
@@ -71,15 +117,31 @@ private fun TplApp() {
                 NavigationBar(containerColor = Color.White) {
                     val icons = listOf(Icons.Default.Home, Icons.Default.MenuBook, Icons.Default.Quiz, Icons.Default.Timer)
                     tabs.forEachIndexed { index, label ->
-                        NavigationBarItem(selected = selectedTab == index, onClick = { selectedTab = index }, icon = { Icon(icons[index], contentDescription = label) }, label = { Text(label, fontSize = 10.sp) })
+                        NavigationBarItem(
+                            selected = selectedTab == index,
+                            onClick = { selectedTab = index },
+                            icon = { Icon(icons[index], contentDescription = label) },
+                            label = { Text(label, fontSize = 10.sp) }
+                        )
                     }
                 }
             }
         ) { padding ->
             when (selectedTab) {
-                0 -> HomeScreen(Modifier.padding(padding), selectedBranch, onBrowseSubjects = { selectedTab = 1 })
+                0 -> HomeScreen(
+                    Modifier.padding(padding),
+                    selectedBranch?.name,
+                    branchesLoading,
+                    branchesError,
+                    onBrowseSubjects = { selectedTab = 1 }
+                )
                 1 -> SubjectsScreen(Modifier.padding(padding), selectedBranch)
-                2 -> PlaceholderScreen(Modifier.padding(padding), "الاختبارات", "سيظهر هنا بنك الأسئلة والاختبارات بعد ربط قاعدة البيانات. لن تُعرض الإجابات الصحيحة قبل إنهاء المحاولة.", Icons.Default.Quiz)
+                2 -> PlaceholderScreen(
+                    Modifier.padding(padding),
+                    "الاختبارات",
+                    "سيظهر هنا بنك الأسئلة والاختبارات بعد تجهيزها من لوحة الإدارة. لن تُعرض الإجابات الصحيحة قبل إنهاء المحاولة.",
+                    Icons.Default.Quiz
+                )
                 else -> PomodoroScreen(Modifier.padding(padding))
             }
         }
@@ -87,13 +149,23 @@ private fun TplApp() {
 }
 
 @Composable
-private fun HomeScreen(modifier: Modifier = Modifier, branch: String, onBrowseSubjects: () -> Unit) {
+private fun HomeScreen(
+    modifier: Modifier = Modifier,
+    branchName: String?,
+    branchesLoading: Boolean,
+    branchesError: String?,
+    onBrowseSubjects: () -> Unit
+) {
     LazyColumn(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Column(Modifier.fillMaxWidth().background(Forest, RoundedCornerShape(22.dp)).padding(20.dp)) {
                 Text("خطوتك القادمة تبدأ من هنا", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
-                Text("مكتبتك الدراسية للفرع $branch، بترتيب أوضح ووقت أقل ضائع في البحث.", color = Color.White.copy(alpha = .88f), lineHeight = 22.sp)
+                Text(
+                    if (branchName != null) "مكتبتك الدراسية للفرع " + branchName + "، والبيانات المنشورة تُحمّل من السحابة."
+                    else "اختر فرعك بعد أن تضيف الإدارة الفروع وتنشرها من لوحة TPL.",
+                    color = Color.White.copy(alpha = .88f), lineHeight = 22.sp
+                )
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Surface(color = Gold, shape = RoundedCornerShape(12.dp), modifier = Modifier.clickable(onClick = onBrowseSubjects)) {
@@ -105,46 +177,146 @@ private fun HomeScreen(modifier: Modifier = Modifier, branch: String, onBrowseSu
                 }
             }
         }
-        item { SectionTitle("أقسام المكتبة", "ابدأ بالمادة التي تدرسها الآن") }
+        if (branchesError != null) {
+            item { Text(branchesError, color = Color(0xFF9B3737), fontSize = 12.sp) }
+        } else if (branchName == null && !branchesLoading) {
+            item {
+                InfoCard(
+                    title = "بانتظار إعداد المكتبة",
+                    body = "لم تنشر الإدارة أي فرع بعد. عند إضافة فرع وتفعيله من لوحة الإدارة سيظهر هنا تلقائيًا.",
+                    icon = Icons.Default.Cloud
+                )
+            }
+        }
+        item { SectionTitle("أقسام المكتبة", "تُدار قائمة الفروع والمواد من لوحة الإدارة") }
         items(listOf("الكتب والمقررات", "الملازم والملخصات", "أوراق العمل", "الامتحانات السابقة")) { title ->
-            Row(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).clickable(onClick = onBrowseSubjects).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp))
+                    .clickable(onClick = onBrowseSubjects).padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Icon(Icons.Default.FolderOpen, contentDescription = null, tint = Forest, modifier = Modifier.size(28.dp))
                 Spacer(Modifier.width(12.dp))
                 Text(title, Modifier.weight(1f), color = Forest, fontWeight = FontWeight.SemiBold)
                 Icon(Icons.Default.ChevronLeft, contentDescription = null, tint = Gold)
             }
         }
-        item { Text("المحتوى المعروض هنا تمهيدي. ستظهر الموارد الحقيقية عند ربط Firebase ولوحة الإدارة.", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) }
+        item {
+            Text(
+                "المحتوى الفعلي يظهر بعد إضافته ونشره من الإدارة. لا توجد قائمة مواد ثابتة داخل التطبيق.",
+                color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+            )
+        }
     }
 }
 
 @Composable
-private fun SubjectsScreen(modifier: Modifier = Modifier, branch: String) {
-    val subjects = if (branch == "العلمي") listOf("الرياضيات", "الفيزياء", "الكيمياء", "الأحياء", "اللغة العربية", "اللغة الإنجليزية")
-    else if (branch == "الأدبي") listOf("اللغة العربية", "اللغة الإنجليزية", "التاريخ", "الجغرافيا", "الرياضيات", "التربية الإسلامية")
-    else listOf("اللغة العربية", "اللغة الإنجليزية", "الرياضيات", "التخصص المهني", "الثقافة العلمية")
+private fun SubjectsScreen(modifier: Modifier = Modifier, branch: Branch?) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val subjectItems = remember(branch?.id) { mutableStateListOf<Subject>() }
+    var loading by remember(branch?.id) { mutableStateOf(branch != null) }
+    var error by remember(branch?.id) { mutableStateOf<String?>(null) }
     var search by remember { mutableStateOf("") }
-    val filtered = subjects.filter { it.contains(search.trim(), ignoreCase = true) }
+
+    DisposableEffect(db, branch?.id) {
+        subjectItems.clear()
+        if (branch == null) {
+            loading = false
+            error = null
+            onDispose { }
+        } else {
+            loading = true
+            val registration = db.collection("subjects")
+                .whereEqualTo("active", true)
+                .addSnapshotListener { snapshot, exception ->
+                    if (exception != null) {
+                        loading = false
+                        error = "تعذّر تحميل المواد. تحقق من اتصال Firebase وقواعد القراءة."
+                        return@addSnapshotListener
+                    }
+                    val updated = snapshot?.documents.orEmpty().mapNotNull { document ->
+                        val name = document.getString("name")?.trim().orEmpty()
+                        val branchIds = (document.get("branchIds") as? List<*>)?.mapNotNull { it as? String }.orEmpty()
+                        if (name.isBlank() || branch.id !in branchIds) null
+                        else Subject(document.id, name, branchIds, (document.get("order") as? Number)?.toInt() ?: 9999)
+                    }.sortedWith(compareBy<Subject> { it.sortOrder }.thenBy { it.name })
+                    subjectItems.clear()
+                    subjectItems.addAll(updated)
+                    loading = false
+                    error = null
+                }
+            onDispose { registration.remove() }
+        }
+    }
+
+    val filtered = subjectItems.filter { it.name.contains(search.trim(), ignoreCase = true) }
     LazyColumn(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { SectionTitle("مواد الفرع $branch", "ابحث عن مادة. القائمة الحالية تجريبية وليست منهجًا رسميًا كاملًا.") }
+        item {
+            SectionTitle(
+                if (branch != null) "مواد الفرع " + branch.name else "المواد",
+                "المواد المنشورة تُحمّل مباشرة من Firestore."
+            )
+        }
         item {
             OutlinedTextField(
                 value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text("ابحث عن مادة...") }, singleLine = true,
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                shape = RoundedCornerShape(14.dp)
+                shape = RoundedCornerShape(14.dp), enabled = branch != null
             )
         }
-        if (filtered.isEmpty()) {
-            item { Text("لا توجد مادة بهذا الاسم في القائمة التجريبية.", color = Color.Gray, modifier = Modifier.padding(12.dp)) }
+        if (branch == null) {
+            item {
+                InfoCard(
+                    "لا يوجد فرع متاح",
+                    "أضف فرعًا واجعله نشطًا من لوحة الإدارة، وسيظهر في قائمة الفروع تلقائيًا.",
+                    Icons.Default.CloudOff
+                )
+            }
+        } else if (loading) {
+            item { LinearProgressIndicator(Modifier.fillMaxWidth(), color = Forest) }
+            item { Text("جارٍ تحميل المواد من السحابة...", color = Color.Gray, fontSize = 13.sp) }
+        } else if (error != null) {
+            item { Text(error!!, color = Color(0xFF9B3737), fontSize = 13.sp) }
+        } else if (filtered.isEmpty()) {
+            item {
+                InfoCard(
+                    if (search.isBlank()) "لم تُضف مواد لهذا الفرع بعد" else "لا توجد نتائج",
+                    if (search.isBlank()) "تضيف الإدارة المواد وتربط كل مادة بفرع أو أكثر من لوحة TPL."
+                    else "جرّب اسم مادة آخر.",
+                    Icons.Default.MenuBook
+                )
+            }
         }
-        items(filtered) { subject ->
-            Row(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(44.dp).background(Ivory, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Default.MenuBook, contentDescription = null, tint = Forest) }
+        items(filtered, key = { it.id }) { subject ->
+            Row(
+                Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(44.dp).background(Ivory, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.MenuBook, contentDescription = null, tint = Forest)
+                }
                 Spacer(Modifier.width(12.dp))
-                Text(subject, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, color = Forest)
+                Text(subject.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, color = Forest)
                 Icon(Icons.Default.ChevronLeft, contentDescription = null, tint = Gold)
             }
+        }
+    }
+}
+
+@Composable
+private fun InfoCard(title: String, body: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Row(
+        Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).padding(18.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Icon(icon, contentDescription = null, tint = Forest, modifier = Modifier.size(26.dp))
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(title, color = Forest, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(5.dp))
+            Text(body, color = Color.Gray, fontSize = 12.sp, lineHeight = 19.sp)
         }
     }
 }
