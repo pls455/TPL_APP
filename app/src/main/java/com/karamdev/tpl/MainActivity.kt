@@ -19,6 +19,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -44,6 +45,14 @@ private val Gold = Color(0xFFC5A15B)
 private data class Branch(val id: String, val name: String, val sortOrder: Int)
 private data class Subject(val id: String, val name: String, val branchIds: List<String>, val sortOrder: Int)
 private data class LibraryResource(val id: String, val title: String, val description: String, val type: String, val url: String)
+private data class PublishedTest(
+    val id: String, val title: String, val description: String, val subjectId: String,
+    val subjectName: String, val type: String, val durationMinutes: Int, val branchIds: List<String>
+)
+private data class StudentQuestion(
+    val id: String, val questionText: String, val type: String,
+    val options: List<String>, val points: Double
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,6 +74,7 @@ private fun TplApp() {
         mutableStateOf(preferences.getString("student_branch_id", "") ?: "")
     }
     var selectedSubject by remember { mutableStateOf<Subject?>(null) }
+    var selectedTest by remember { mutableStateOf<PublishedTest?>(null) }
 
     DisposableEffect(db) {
         val registration: ListenerRegistration = db.collection("branches")
@@ -153,6 +163,7 @@ private fun TplApp() {
                     onBranchSelected = { branch ->
                         selectedBranchId = branch.id
                         selectedSubject = null
+                        selectedTest = null
                         preferences.edit().putString("student_branch_id", branch.id).apply()
                     },
                     onBrowseSubjects = { selectedTab = 1 }
@@ -173,12 +184,19 @@ private fun TplApp() {
                 } else {
                     SubjectResourcesScreen(Modifier.padding(padding), selectedBranch, selectedSubject!!, onBack = { selectedSubject = null })
                 }
-                2 -> PlaceholderScreen(
-                    Modifier.padding(padding),
-                    "الاختبارات",
-                    "سيظهر هنا بنك الأسئلة والاختبارات بعد تجهيزها من لوحة الإدارة. لن تُعرض الإجابات الصحيحة قبل إنهاء المحاولة.",
-                    Icons.Default.Quiz
-                )
+                2 -> if (selectedTest == null) {
+                    PublishedTestsScreen(
+                        modifier = Modifier.padding(padding),
+                        branch = selectedBranch,
+                        onTestSelected = { selectedTest = it }
+                    )
+                } else {
+                    StudentTestScreen(
+                        modifier = Modifier.padding(padding),
+                        test = selectedTest!!,
+                        onBack = { selectedTest = null }
+                    )
+                }
                 else -> PomodoroScreen(Modifier.padding(padding))
             }
             }
@@ -539,6 +557,226 @@ private fun SubjectResourcesScreen(
                     Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("فتح المورد")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PublishedTestsScreen(
+    modifier: Modifier,
+    branch: Branch?,
+    onTestSelected: (PublishedTest) -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val tests = remember(branch?.id) { mutableStateListOf<PublishedTest>() }
+    var loading by remember(branch?.id) { mutableStateOf(branch != null) }
+    var error by remember(branch?.id) { mutableStateOf<String?>(null) }
+
+    DisposableEffect(db, branch?.id) {
+        tests.clear()
+        if (branch == null) {
+            loading = false
+            error = null
+            onDispose { }
+        } else {
+            loading = true
+            val registration = db.collection("tests")
+                .whereEqualTo("published", true)
+                .addSnapshotListener { snapshot, exception ->
+                    if (exception != null) {
+                        loading = false
+                        error = "تعذّر تحميل الاختبارات. تحقق من الاتصال وقواعد Firestore."
+                        return@addSnapshotListener
+                    }
+                    val updated = snapshot?.documents.orEmpty().mapNotNull { document ->
+                        val title = document.getString("title")?.trim().orEmpty()
+                        val branchIds = (document.get("branchIds") as? List<*>)?.mapNotNull { it as? String }.orEmpty()
+                        val active = document.getBoolean("active") ?: true
+                        if (title.isBlank() || !active || branch.id !in branchIds) null
+                        else PublishedTest(
+                            id = document.id,
+                            title = title,
+                            description = document.getString("description").orEmpty(),
+                            subjectId = document.getString("subjectId").orEmpty(),
+                            subjectName = document.getString("subjectName").orEmpty(),
+                            type = document.getString("type").orEmpty(),
+                            durationMinutes = (document.getLong("durationMinutes") ?: 0L).toInt(),
+                            branchIds = branchIds
+                        )
+                    }.sortedWith(compareBy<PublishedTest> { it.subjectName }.thenBy { it.title })
+                    tests.clear()
+                    tests.addAll(updated)
+                    loading = false
+                    error = null
+                }
+            onDispose { registration.remove() }
+        }
+    }
+
+    LazyColumn(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            SectionTitle("الاختبارات", if (branch == null) "اختر فرعك أولًا لعرض اختبارته المنشورة." else "اختبارات منشورة لفرع ${branch.name}")
+        }
+        if (branch == null) {
+            item { InfoCard("اختر فرعك الدراسي", "ارجع إلى الرئيسية وحدد الفرع المناسب، ثم افتح الاختبارات.", Icons.Default.School) }
+        } else if (loading) {
+            item { LinearProgressIndicator(Modifier.fillMaxWidth(), color = Forest) }
+            item { Text("جارٍ تحميل الاختبارات المنشورة...", color = Color.Gray, fontSize = 13.sp) }
+        } else if (error != null) {
+            item { Text(error!!, color = Color(0xFF9B3737), fontSize = 13.sp) }
+        } else if (tests.isEmpty()) {
+            item { InfoCard("لا توجد اختبارات منشورة بعد", "الاختبارات التي تنشئها الإدارة لا تظهر هنا إلا بعد إضافة سؤال واحد على الأقل ثم اختيار «نشر للطلاب».", Icons.Default.Quiz) }
+        }
+        items(tests, key = { it.id }) { test ->
+            Column(
+                Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(18.dp)).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(42.dp).background(Ivory, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Quiz, contentDescription = null, tint = Forest)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(test.title, color = Forest, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text(test.subjectName, color = Color.Gray, fontSize = 12.sp)
+                    }
+                }
+                Text(
+                    when (test.type) {
+                        "timed" -> "اختبار بوقت"
+                        "past_paper" -> "ورقة امتحان سابقة"
+                        else -> "تدريب"
+                    } + if (test.durationMinutes > 0) " · ${test.durationMinutes} دقيقة" else " · دون مؤقت",
+                    color = Color(0xFF8D713B), fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+                )
+                if (test.description.isNotBlank()) Text(test.description, color = Color.DarkGray, fontSize = 13.sp, lineHeight = 20.sp)
+                Button(
+                    onClick = { onTestSelected(test) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Forest)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Spacer(Modifier.width(7.dp))
+                    Text("فتح الاختبار")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StudentTestScreen(
+    modifier: Modifier,
+    test: PublishedTest,
+    onBack: () -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val questions = remember(test.id) { mutableStateListOf<StudentQuestion>() }
+    val answers = remember(test.id) { mutableStateMapOf<String, String>() }
+    var loading by remember(test.id) { mutableStateOf(true) }
+    var error by remember(test.id) { mutableStateOf<String?>(null) }
+    var submitted by remember(test.id) { mutableStateOf(false) }
+
+    DisposableEffect(db, test.id) {
+        questions.clear()
+        loading = true
+        val registration = db.collection("studentQuestions")
+            .whereEqualTo("testId", test.id)
+            .whereEqualTo("published", true)
+            .whereEqualTo("active", true)
+            .addSnapshotListener { snapshot, exception ->
+                if (exception != null) {
+                    loading = false
+                    error = "تعذّر تحميل أسئلة الاختبار. تأكد أن الإدارة نشرت نسخة الأسئلة المخصصة للطلاب."
+                    return@addSnapshotListener
+                }
+                val updated = snapshot?.documents.orEmpty().mapNotNull { document ->
+                    val text = document.getString("questionText")?.trim().orEmpty()
+                    if (text.isBlank()) null
+                    else StudentQuestion(
+                        id = document.id,
+                        questionText = text,
+                        type = document.getString("type").orEmpty(),
+                        options = (document.get("options") as? List<*>)?.mapNotNull { it as? String }.orEmpty(),
+                        points = document.getDouble("points") ?: 1.0
+                    )
+                }
+                questions.clear()
+                questions.addAll(updated)
+                loading = false
+                error = null
+            }
+        onDispose { registration.remove() }
+    }
+
+    LazyColumn(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            TextButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("العودة إلى الاختبارات")
+            }
+            SectionTitle(test.title, test.subjectName + " · " + if (test.durationMinutes > 0) "${test.durationMinutes} دقيقة" else "دون مؤقت")
+            Text("حدّد إجاباتك. لن يتم إرسال مفتاح الإجابات الصحيحة إلى جهازك.", color = Color.Gray, fontSize = 12.sp)
+        }
+        if (loading) {
+            item { LinearProgressIndicator(Modifier.fillMaxWidth(), color = Forest) }
+        } else if (error != null) {
+            item { Text(error!!, color = Color(0xFF9B3737), fontSize = 13.sp) }
+        } else if (questions.isEmpty()) {
+            item { InfoCard("لا توجد أسئلة متاحة", "أعد نشر الاختبار من لوحة الإدارة بعد التأكد من وجود أسئلة نشطة.", Icons.Default.Info) }
+        } else {
+            itemsIndexed(questions, key = { _, question -> question.id }) { index, question ->
+                Column(
+                    Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(18.dp)).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    Text("السؤال ${index + 1} · ${question.points} علامة", color = Color(0xFF8D713B), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text(question.questionText, color = Forest, fontWeight = FontWeight.SemiBold, lineHeight = 23.sp)
+                    if (question.options.isNotEmpty()) {
+                        question.options.forEach { option ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable { answers[question.id] = option; submitted = false }.padding(vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = answers[question.id] == option,
+                                    onClick = { answers[question.id] = option; submitted = false },
+                                    colors = RadioButtonDefaults.colors(selectedColor = Forest)
+                                )
+                                Text(option, color = Color.DarkGray, modifier = Modifier.weight(1f), fontSize = 14.sp)
+                            }
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = answers[question.id].orEmpty(),
+                            onValueChange = { answers[question.id] = it; submitted = false },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("إجابتك") },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+                }
+            }
+            item {
+                Button(
+                    onClick = { submitted = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Forest)
+                ) {
+                    Text("إنهاء تحديد الإجابات")
+                }
+            }
+            if (submitted) {
+                item {
+                    InfoCard(
+                        "تم إنهاء الاختيار",
+                        "تم تجهيز إجاباتك داخل الشاشة الحالية. التصحيح الآلي وحفظ المحاولة بالحساب يحتاجان خدمة تحقق آمنة، لذلك لا نعرض علامة غير موثوقة ولا نرسل الإجابات الصحيحة للتطبيق.",
+                        Icons.Default.CheckCircle
+                    )
                 }
             }
         }
