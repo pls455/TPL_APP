@@ -19,13 +19,13 @@ The Firebase Android config file contains client configuration, not an Admin SDK
 
 ## Integration order
 
-1. Add the Google Services Gradle plugin and Firebase BoM.
-2. Wire Firebase Authentication and a student profile repository.
-3. Add Firestore repositories for branches, subjects, and published resource metadata.
-4. Deploy and test Firestore rules before enabling writes.
+1. The Google Services Gradle plugin, Firebase BoM, Auth SDK, and Firestore SDK are now installed in the Android build.
+2. The app reads active branches from `branches` and active subjects from `subjects` in Firestore using live snapshot listeners.
+3. The admin web panel manages branches and subjects, including their active state, display order, and branch associations. Writes are intended for the super admin and content managers only.
+4. Deploy and test Firestore rules before relying on any cloud data; files in the repository are not automatically deployed to Firebase Console.
 5. Implement the Cloudflare Worker path for private Dbrij uploads/downloads. The app must never receive S3 access keys.
-6. Test authenticated access, unauthorized access, expired downloads, and role boundaries before release.
+6. Student authentication/profile sync, resource metadata, tests, and exam submissions still need implementation and security testing.
 
 ## Current status
 
-The current Android app has a working local branch preference, searchable starter subject list, and local Pomodoro timer. Firebase sign-in, live Firestore content, PDF storage delivery, and exam submissions are not connected yet. Starter subjects are demonstration data, not an authoritative curriculum.
+The Android branch and subject catalogs now load from Firestore; there is no embedded sample curriculum fallback. A branch will appear only after it exists in Firestore with `active: true`. Firebase Auth SDK is installed but student sign-in is not implemented yet. PDF storage delivery, resource metadata, and exam submissions are still not connected.
