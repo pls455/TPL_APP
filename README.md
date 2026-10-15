@@ -11,7 +11,7 @@
 ## Current features
 - Live active branches from Firestore `branches`
 - Live active subjects from Firestore `subjects`, filtered by branch document IDs
-- Live published external resources from Firestore `resources` inside each subject
+- Live published resources from Firestore `resources` inside each subject, including uploaded files linked through Firebase Storage
 - Local branch selection preference, updated automatically if the selected branch is deactivated
 - Contextual branch picker card on the home screen and subject screen, instead of an isolated selector in the top bar
 - Animated branch selection and subtle transitions between app sections
@@ -26,15 +26,15 @@ The app does not hardcode the branch or subject list. The admin panel manages br
 Expected fields:
 - `branches/{autoId}`: `name` (string), `active` (boolean), `order` (number)
 - `subjects/{autoId}`: `name` (string), `branchIds` (array of branch document IDs), `active` (boolean), `order` (number)
-- `resources/{autoId}`: `title`, `description`, `type`, `subjectId`, `branchIds`, `status`, and `externalUrl` or `sourceUrl`
+- `resources/{autoId}`: `title`, `description`, `type`, `subjectId`, `branchIds`, `status`, `storageKey`, and `externalUrl` or `sourceUrl`
 
-## Not connected yet
-Student authentication/profile sync, exam/question screens, and private Dbrij upload/download are not wired yet. Resource links are external URLs; they are not uploaded to private storage by the app.
+## Assessments
+The tests tab reads published tests for the selected branch. Student questions come from the `studentQuestions` projection, which must not contain `correctAnswer` or `explanation`. Choices and short answers are held in the current screen state. Trusted automatic grading, account-based attempt saving, and timed countdown behavior are not implemented yet.
 
 ## Firebase setup
 - Android package: `com.karamdev.tpl`
 - The Firebase Android config belongs at `app/google-services.json`.
-- Deploy the reviewed `firestore.rules` from the web repository through Firebase Console. Committing rules to GitHub does not publish them to Firebase.
+- Deploy the reviewed `firestore.rules` and `storage.rules` from the web repository through Firebase Console. Committing rules to GitHub does not publish them to Firebase.
 - If branches or subjects do not load, check internet access, Firebase project/package match, and deployed Firestore rules.
 
 ## Build
