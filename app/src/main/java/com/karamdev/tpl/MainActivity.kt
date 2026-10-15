@@ -193,7 +193,15 @@ private fun PomodoroScreen(modifier: Modifier) {
         }
         if (remainingSeconds == 0) {
             Spacer(Modifier.height(12.dp))
-            Button(onClick = { isBreak = !isBreak; remainingSeconds = (if (isBreak) focusMinutes else 5) * 60 }) {
+            Button(onClick = {
+                if (isBreak) {
+                    isBreak = false
+                    remainingSeconds = focusMinutes * 60
+                } else {
+                    isBreak = true
+                    remainingSeconds = 5 * 60
+                }
+            }) {
                 Text(if (isBreak) "ابدأ جلسة تركيز" else "ابدأ استراحة 5 دقائق")
             }
         }
