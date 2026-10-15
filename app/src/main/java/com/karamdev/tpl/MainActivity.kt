@@ -237,25 +237,21 @@ private fun HomeScreen(
                 )
             }
         }
-        item { SectionTitle("أقسام المكتبة", "تُدار قائمة الفروع والمواد من لوحة الإدارة") }
-        items(listOf("الكتب والمقررات", "الملازم والملخصات", "أوراق العمل", "الامتحانات السابقة")) { title ->
+        item { SectionTitle("كيف تبدأ؟", "ثلاث خطوات واضحة للوصول إلى محتوى فرعك") }
+        items(listOf(
+            "١. اختر فرعك الدراسي من البطاقة أعلاه",
+            "٢. افتح تبويب المواد واختر المادة المطلوبة",
+            "٣. افتح المورد المنشور وابدأ الدراسة"
+        )) { step ->
             Row(
-                Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp))
-                    .clickable(onClick = onBrowseSubjects).padding(16.dp),
+                Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(15.dp))
+                    .padding(horizontal = 15.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.FolderOpen, contentDescription = null, tint = Forest, modifier = Modifier.size(28.dp))
-                Spacer(Modifier.width(12.dp))
-                Text(title, Modifier.weight(1f), color = Forest, fontWeight = FontWeight.SemiBold)
-                Icon(Icons.Default.ChevronLeft, contentDescription = null, tint = Gold)
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Gold, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(11.dp))
+                Text(step, Modifier.weight(1f), color = Forest, fontWeight = FontWeight.Medium, fontSize = 13.sp)
             }
-        }
-        item {
-            Text(
-                "المحتوى الفعلي يظهر بعد إضافته ونشره من الإدارة. لا توجد قائمة مواد ثابتة داخل التطبيق.",
-                color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-            )
         }
     }
 }
