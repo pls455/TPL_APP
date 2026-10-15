@@ -13,6 +13,9 @@
 - Live active subjects from Firestore `subjects`, filtered by branch document IDs
 - Live published external resources from Firestore `resources` inside each subject
 - Local branch selection preference, updated automatically if the selected branch is deactivated
+- Contextual branch picker card on the home screen and subject screen, instead of an isolated selector in the top bar
+- Animated branch selection and subtle transitions between app sections, respecting reduced-motion preferences where the system controls animation
+- Clear three-step student onboarding instead of static categories that all opened the same screen
 - Search within the cloud-loaded subject list
 - Local Pomodoro timer and navigation scaffold
 - GitHub Actions debug APK build
