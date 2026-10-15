@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "61246778282",
+    "project_id": "tpl-38d2e",
+    "storage_bucket": "tpl-38d2e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:61246778282:android:628ece4d819e2e373659d3",
+        "android_client_info": {
+          "package_name": "com.karamdev.tpl"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "61246778282-f21hggeb6jjqaj94hvqtr572kensffpg.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDAYNJzQKD4q3_sD4P0CVmddnGdvbjrVng"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "61246778282-f21hggeb6jjqaj94hvqtr572kensffpg.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
