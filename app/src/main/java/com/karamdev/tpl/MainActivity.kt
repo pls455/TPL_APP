@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -31,6 +32,7 @@ private val Gold = Color(0xFFC5A15B)
 
 private data class Branch(val id: String, val name: String, val sortOrder: Int)
 private data class Subject(val id: String, val name: String, val branchIds: List<String>, val sortOrder: Int)
+private data class LibraryResource(val id: String, val title: String, val description: String, val type: String, val url: String)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,6 +53,7 @@ private fun TplApp() {
     var selectedBranchId by remember {
         mutableStateOf(preferences.getString("student_branch_id", "") ?: "")
     }
+    var selectedSubject by remember { mutableStateOf<Subject?>(null) }
 
     DisposableEffect(db) {
         val registration: ListenerRegistration = db.collection("branches")
@@ -72,6 +75,7 @@ private fun TplApp() {
                 branchesError = null
                 if (branches.none { it.id == selectedBranchId }) {
                     selectedBranchId = branches.firstOrNull()?.id.orEmpty()
+                    selectedSubject = null
                     preferences.edit().putString("student_branch_id", selectedBranchId).apply()
                 }
             }
@@ -105,6 +109,7 @@ private fun TplApp() {
                             branches.forEach { branch ->
                                 DropdownMenuItem(text = { Text(branch.name) }, onClick = {
                                     selectedBranchId = branch.id
+                                    selectedSubject = null
                                     preferences.edit().putString("student_branch_id", branch.id).apply()
                                     expanded = false
                                 })
@@ -135,7 +140,11 @@ private fun TplApp() {
                     branchesError,
                     onBrowseSubjects = { selectedTab = 1 }
                 )
-                1 -> SubjectsScreen(Modifier.padding(padding), selectedBranch)
+                1 -> if (selectedSubject == null) {
+                    SubjectsScreen(Modifier.padding(padding), selectedBranch, onSubjectSelected = { selectedSubject = it })
+                } else {
+                    SubjectResourcesScreen(Modifier.padding(padding), selectedBranch, selectedSubject!!, onBack = { selectedSubject = null })
+                }
                 2 -> PlaceholderScreen(
                     Modifier.padding(padding),
                     "الاختبارات",
@@ -212,7 +221,7 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun SubjectsScreen(modifier: Modifier = Modifier, branch: Branch?) {
+private fun SubjectsScreen(modifier: Modifier = Modifier, branch: Branch?, onSubjectSelected: (Subject) -> Unit) {
     val db = remember { FirebaseFirestore.getInstance() }
     val subjectItems = remember(branch?.id) { mutableStateListOf<Subject>() }
     var loading by remember(branch?.id) { mutableStateOf(branch != null) }
@@ -291,7 +300,7 @@ private fun SubjectsScreen(modifier: Modifier = Modifier, branch: Branch?) {
         }
         items(filtered, key = { it.id }) { subject ->
             Row(
-                Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).padding(18.dp),
+                Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).clickable { onSubjectSelected(subject) }.padding(18.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(Modifier.size(44.dp).background(Ivory, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
@@ -300,6 +309,117 @@ private fun SubjectsScreen(modifier: Modifier = Modifier, branch: Branch?) {
                 Spacer(Modifier.width(12.dp))
                 Text(subject.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, color = Forest)
                 Icon(Icons.Default.ChevronLeft, contentDescription = null, tint = Gold)
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun SubjectResourcesScreen(
+    modifier: Modifier,
+    branch: Branch?,
+    subject: Subject,
+    onBack: () -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val uriHandler = LocalUriHandler.current
+    val resourceItems = remember(subject.id, branch?.id) { mutableStateListOf<LibraryResource>() }
+    var loading by remember(subject.id, branch?.id) { mutableStateOf(branch != null) }
+    var error by remember(subject.id, branch?.id) { mutableStateOf<String?>(null) }
+
+    DisposableEffect(db, subject.id, branch?.id) {
+        resourceItems.clear()
+        if (branch == null) {
+            loading = false
+            error = null
+            onDispose { }
+        } else {
+            loading = true
+            val registration = db.collection("resources")
+                .whereEqualTo("status", "published")
+                .addSnapshotListener { snapshot, exception ->
+                    if (exception != null) {
+                        loading = false
+                        error = "تعذّر تحميل موارد المادة. تحقق من اتصال Firebase وقواعد القراءة."
+                        return@addSnapshotListener
+                    }
+                    val updated = snapshot?.documents.orEmpty().mapNotNull { document ->
+                        val title = document.getString("title")?.trim().orEmpty()
+                        val subjectId = document.getString("subjectId").orEmpty()
+                        val branchIds = (document.get("branchIds") as? List<*>)?.mapNotNull { it as? String }.orEmpty()
+                        val url = (document.getString("externalUrl") ?: document.getString("sourceUrl")).orEmpty()
+                        if (title.isBlank() || subjectId != subject.id || branch.id !in branchIds || url.isBlank()) null
+                        else LibraryResource(
+                            id = document.id,
+                            title = title,
+                            description = document.getString("description").orEmpty(),
+                            type = document.getString("type").orEmpty(),
+                            url = url
+                        )
+                    }.sortedBy { it.title }
+                    resourceItems.clear()
+                    resourceItems.addAll(updated)
+                    loading = false
+                    error = null
+                }
+            onDispose { registration.remove() }
+        }
+    }
+
+    LazyColumn(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            TextButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("العودة إلى المواد")
+            }
+            SectionTitle(subject.name, "الموارد المنشورة لهذه المادة تظهر هنا من السحابة.")
+        }
+        if (loading) {
+            item { LinearProgressIndicator(Modifier.fillMaxWidth(), color = Forest) }
+            item { Text("جارٍ تحميل الموارد...", color = Color.Gray, fontSize = 13.sp) }
+        } else if (error != null) {
+            item { Text(error!!, color = Color(0xFF9B3737), fontSize = 13.sp) }
+        } else if (resourceItems.isEmpty()) {
+            item {
+                InfoCard(
+                    "لا توجد موارد منشورة بعد",
+                    "يمكن للإدارة إضافة رابط للمادة من لوحة TPL. لن يظهر المورد هنا حتى يتم اعتماده ونشره.",
+                    Icons.Default.FolderOpen
+                )
+            }
+        }
+        items(resourceItems, key = { it.id }) { resource ->
+            val uri = android.net.Uri.parse(resource.url)
+            val validUrl = (uri.scheme == "https" || uri.scheme == "http") && !uri.host.isNullOrBlank()
+            Column(
+                Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(resource.title, color = Forest, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(
+                    when (resource.type) {
+                        "pdf" -> "ملف PDF"
+                        "video" -> "فيديو"
+                        "exam" -> "امتحان سابق"
+                        "summary" -> "ملخص"
+                        else -> "رابط خارجي"
+                    },
+                    color = Color(0xFF8D713B), fontSize = 11.sp, fontWeight = FontWeight.SemiBold
+                )
+                if (resource.description.isNotBlank()) {
+                    Text(resource.description, color = Color.DarkGray, fontSize = 13.sp, lineHeight = 20.sp)
+                }
+                Button(
+                    enabled = validUrl,
+                    onClick = { uriHandler.openUri(resource.url) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Forest)
+                ) {
+                    Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("فتح المورد")
+                }
             }
         }
     }
