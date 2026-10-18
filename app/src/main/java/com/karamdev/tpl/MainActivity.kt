@@ -44,7 +44,8 @@ private val Gold = Color(0xFFC5A15B)
 
 private data class Branch(val id: String, val name: String, val sortOrder: Int)
 private data class Subject(val id: String, val name: String, val branchIds: List<String>, val sortOrder: Int)
-private data class LibraryResource(val id: String, val title: String, val description: String, val type: String, val url: String)
+private data class CurriculumUnit(val id: String, val name: String, val description: String, val sortOrder: Int, val branchIds: List<String>)
+private data class LibraryResource(val id: String, val title: String, val description: String, val type: String, val url: String, val unitId: String)
 private data class PublishedTest(
     val id: String, val title: String, val description: String, val subjectId: String,
     val subjectName: String, val type: String, val durationMinutes: Int, val branchIds: List<String>
@@ -464,8 +465,49 @@ private fun SubjectResourcesScreen(
     val db = remember { FirebaseFirestore.getInstance() }
     val uriHandler = LocalUriHandler.current
     val resourceItems = remember(subject.id, branch?.id) { mutableStateListOf<LibraryResource>() }
+    val units = remember(subject.id, branch?.id) { mutableStateListOf<CurriculumUnit>() }
+    var selectedUnitId by remember(subject.id, branch?.id) { mutableStateOf("") }
+    var unitsError by remember(subject.id, branch?.id) { mutableStateOf<String?>(null) }
     var loading by remember(subject.id, branch?.id) { mutableStateOf(branch != null) }
     var error by remember(subject.id, branch?.id) { mutableStateOf<String?>(null) }
+
+    DisposableEffect(db, subject.id, branch?.id) {
+        units.clear()
+        if (branch == null) {
+            unitsError = null
+            selectedUnitId = ""
+            onDispose { }
+        } else {
+            val unitsRegistration = db.collection("units")
+                .whereEqualTo("subjectId", subject.id)
+                .whereEqualTo("active", true)
+                .addSnapshotListener { snapshot, exception ->
+                    if (exception != null) {
+                        units.clear()
+                        selectedUnitId = ""
+                        unitsError = "تعذّر تحميل وحدات المادة. ستظل الموارد المتاحة ظاهرة أدناه."
+                        return@addSnapshotListener
+                    }
+                    val updatedUnits = snapshot?.documents.orEmpty().mapNotNull { document ->
+                        val name = document.getString("name")?.trim().orEmpty()
+                        val branchIds = (document.get("branchIds") as? List<*>)?.mapNotNull { it as? String }.orEmpty()
+                        if (name.isBlank() || branch.id !in branchIds) null
+                        else CurriculumUnit(
+                            id = document.id,
+                            name = name,
+                            description = document.getString("description").orEmpty(),
+                            sortOrder = (document.get("order") as? Number)?.toInt() ?: 9999,
+                            branchIds = branchIds
+                        )
+                    }.sortedWith(compareBy<CurriculumUnit> { it.sortOrder }.thenBy { it.name })
+                    units.clear()
+                    units.addAll(updatedUnits)
+                    if (units.none { it.id == selectedUnitId }) selectedUnitId = ""
+                    unitsError = null
+                }
+            onDispose { unitsRegistration.remove() }
+        }
+    }
 
     DisposableEffect(db, subject.id, branch?.id) {
         resourceItems.clear()
@@ -494,7 +536,8 @@ private fun SubjectResourcesScreen(
                             title = title,
                             description = document.getString("description").orEmpty(),
                             type = document.getString("type").orEmpty(),
-                            url = url
+                            url = url,
+                            unitId = document.getString("unitId").orEmpty()
                         )
                     }.sortedBy { it.title }
                     resourceItems.clear()
@@ -506,6 +549,9 @@ private fun SubjectResourcesScreen(
         }
     }
 
+    val selectedUnit = units.firstOrNull { it.id == selectedUnitId }
+    val visibleResources = resourceItems.filter { selectedUnitId.isBlank() || it.unitId == selectedUnitId }
+
     LazyColumn(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             TextButton(onClick = onBack) {
@@ -513,23 +559,62 @@ private fun SubjectResourcesScreen(
                 Spacer(Modifier.width(6.dp))
                 Text("العودة إلى المواد")
             }
-            SectionTitle(subject.name, "الموارد المنشورة لهذه المادة تظهر هنا من السحابة.")
+            SectionTitle(
+                subject.name,
+                selectedUnit?.let { "الوحدة: " + it.name + if (it.description.isBlank()) "" else " · " + it.description }
+                    ?: "الموارد المنشورة لهذه المادة تظهر هنا من السحابة."
+            )
+        }
+        if (unitsError != null) {
+            item { Text(unitsError!!, color = Color(0xFF8D713B), fontSize = 12.sp) }
+        }
+        if (units.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("تصفّح حسب الوحدة", color = Forest, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedUnitId.isBlank(),
+                            onClick = { selectedUnitId = "" },
+                            label = { Text("كل موارد المادة") }
+                        )
+                        units.forEach { unit ->
+                            FilterChip(
+                                selected = selectedUnitId == unit.id,
+                                onClick = { selectedUnitId = unit.id },
+                                label = { Text(unit.name) }
+                            )
+                        }
+                    }
+                }
+            }
         }
         if (loading) {
             item { LinearProgressIndicator(Modifier.fillMaxWidth(), color = Forest) }
             item { Text("جارٍ تحميل الموارد...", color = Color.Gray, fontSize = 13.sp) }
         } else if (error != null) {
             item { Text(error!!, color = Color(0xFF9B3737), fontSize = 13.sp) }
-        } else if (resourceItems.isEmpty()) {
+        } else if (visibleResources.isEmpty()) {
             item {
-                InfoCard(
-                    "لا توجد موارد منشورة بعد",
-                    "يمكن للإدارة رفع ملف أو إضافة رابط للمادة من لوحة TPL. لن يظهر المورد هنا حتى يتم اعتماده ونشره.",
-                    Icons.Default.FolderOpen
-                )
+                if (selectedUnitId.isBlank()) {
+                    InfoCard(
+                        "لا توجد موارد منشورة بعد",
+                        "يمكن للإدارة رفع ملف أو إضافة رابط للمادة من لوحة TPL. لن يظهر المورد هنا حتى يتم اعتماده ونشره.",
+                        Icons.Default.FolderOpen
+                    )
+                } else {
+                    InfoCard(
+                        "لا توجد موارد منشورة لهذه الوحدة",
+                        "قد تضيف الإدارة الموارد لهذه الوحدة لاحقًا. يمكنك اختيار وحدة أخرى أو عرض كل موارد المادة.",
+                        Icons.Default.FolderOpen
+                    )
+                }
             }
         }
-        items(resourceItems, key = { it.id }) { resource ->
+        items(visibleResources, key = { it.id }) { resource ->
             val uri = android.net.Uri.parse(resource.url)
             val validUrl = (uri.scheme == "https" || uri.scheme == "http") && !uri.host.isNullOrBlank()
             Column(
